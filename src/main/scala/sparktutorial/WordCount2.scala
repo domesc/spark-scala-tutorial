@@ -1,5 +1,6 @@
 // package com.foo.bar    // You could put the code in a package...
 
+import org.apache.spark.rdd.RDD
 import util.FileUtil
 import org.apache.spark.{SparkConf, SparkContext}
 // Implicit conversions, such as methods defined in
@@ -17,6 +18,12 @@ import org.apache.spark.SparkContext._
  * "main".
  */
 object WordCount2 {
+  def peek(rdd: RDD[_], n: Int = 10): Unit = {
+    println("=====================")
+    rdd.take(n).foreach(println)
+    println("=====================")
+  }
+
   def main(args: Array[String]): Unit = {
 
     // The first argument specifies the "master" (see the tutorial notes).
@@ -63,31 +70,68 @@ object WordCount2 {
       // and checksum files.
       println(s"Writing output to: $out")
       wc.saveAsTextFile(out)
+
+      // Exercise: Use other versions of the Bible:
+      //   The data directory contains similar files for the Tanach (t3utf.dat - in Hebrew),
+      //   the Latin Vulgate (vuldat.txt), the Septuagint (sept.txt - Greek)
+      val latinInput = sc.textFile("data/vuldat.txt").map(line => line.toLowerCase)
+      val wcLatin = latinInput
+        .flatMap(line => line.split("""[^\p{IsAlphabetic}]+"""))
+        .map(word => (word, 1))
+        .reduceByKey(_ + _)
+
+      wcLatin.cache()
+
+      peek(wcLatin)
+
+      // Exercise: See the Scaladoc page for `OrderedRDDFunctions`:
+      //   http://spark.apache.org/docs/latest/api/scala/index.html#org.apache.spark.rdd.OrderedRDDFunctions
+      //   Sort the output by word, try both ascending and descending.
+      //   Note this can be expensive for large data sets!
+
+      // no need for implicit ordering function since already defined for String which is already the Key of the RDD
+      //ascending sort
+      val wcLatinSortedByWordAsc = wcLatin.sortByKey()
+      peek(wcLatinSortedByWordAsc)
+
+      //descending sort
+      val wcLatinSortedByWordDesc = wcLatin.sortByKey(ascending = false)
+      peek(wcLatinSortedByWordDesc)
+
+      // Exercise: Take the output from the previous exercise and count the number
+      //   of words that start with each letter of the alphabet and each digit.
+
+      val groupedByFirstLetter = wcLatinSortedByWordAsc
+        .keyBy{case (word, count) => word.head}
+        .reduceByKey((t1, t2) => (t1._1, t1._2 + t2._2))
+        .map{case (key, (word, totalCount)) => (key, totalCount)}
+      peek(groupedByFirstLetter)
+
+      // Exercise (Hard): Sort the output by count. You can't use the same
+      //   approach as in the previous exercise. Hint: See RDD.keyBy
+      //   (http://spark.apache.org/docs/latest/api/scala/index.html#org.apache.spark.rdd.RDD)
+      val sortedByCount = wcLatin
+        .keyBy{case (word, count) => count}
+        .sortByKey(ascending = false)
+        .map {case (key, (word, count)) => (word, count)}
+
+      peek(sortedByCount)
+
+      // Exercise (Hard): Group the word-count pairs by count. In other words,
+      //   All pairs where the count is 1 are together (i.e., just one occurrence
+      //   of those words was found), all pairs where the count is 2, etc. Sort
+      //   ascending or descending. Hint: Is there a method for grouping?
+      val addToList = (list: List[String], value: Tuple2[String, Int]) => list :+ value._1
+      val mergeFun = (l1: List[String], l2: List[String]) =>  l1 ++ l2
+      val groupedByCount = wcLatin
+        .keyBy {case (word, count) => count}
+        .aggregateByKey(List.empty[String])(addToList, mergeFun)
+        .sortByKey(ascending = false)
+
+      peek(groupedByCount)
+
     } finally {
       sc.stop()      // Stop (shut down) the context.
     }
-
-    // Exercise: Use other versions of the Bible:
-    //   The data directory contains similar files for the Tanach (t3utf.dat - in Hebrew),
-    //   the Latin Vulgate (vuldat.txt), the Septuagint (sept.txt - Greek)
-    // Exercise: See the Scaladoc page for `OrderedRDDFunctions`:
-    //   http://spark.apache.org/docs/latest/api/scala/index.html#org.apache.spark.rdd.OrderedRDDFunctions
-    //   Sort the output by word, try both ascending and descending.
-    //   Note this can be expensive for large data sets!
-    // Exercise: Take the output from the previous exercise and count the number
-    //   of words that start with each letter of the alphabet and each digit.
-    // Exercise (Hard): Sort the output by count. You can't use the same
-    //   approach as in the previous exercise. Hint: See RDD.keyBy
-    //   (http://spark.apache.org/docs/latest/api/scala/index.html#org.apache.spark.rdd.RDD)
-    //   What's the most frequent word that isn't a "stop word".
-    // Exercise (Hard): Group the word-count pairs by count. In other words,
-    //   All pairs where the count is 1 are together (i.e., just one occurrence
-    //   of those words was found), all pairs where the count is 2, etc. Sort
-    //   ascending or descending. Hint: Is there a method for grouping?
-    // Exercise (Thought Experiment): Consider the size of each group created
-    //   in the previous exercise and the distribution of those sizes vs. counts.
-    //   What characteristics would you expect for this distribution? That is,
-    //   which words (or kinds of words) would you expect to occur most
-    //   frequently? What kind of distribution fits the counts (numbers)?
   }
 }
